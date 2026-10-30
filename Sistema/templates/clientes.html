@@ -1,0 +1,239 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Clientes</title>
+</head>
+
+<body>
+  <header id="topo"></header>
+
+  <main>
+    <div id="msg" class="msg"></div>
+
+    <div class="card">
+      <form id="busca" class="grid">
+        <label>
+          Buscar cliente
+          <input id="q" placeholder="Nome, e-mail ou telefone">
+        </label>
+        <div>
+          <button>Buscar</button>
+          <button type="button" class="sec" id="todos">Mostrar todos</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 id="titulo">Novo cliente</h3>
+
+      <form id="f" class="grid">
+        <input type="hidden" id="id">
+
+        <label>
+          Nome
+          <input id="nome" required>
+        </label>
+
+        <label>
+          CPF
+          <input id="cpf" placeholder="000.000.000-00">
+        </label>
+
+        <label>
+          Telefone
+          <input id="telefone">
+        </label>
+
+        <label>
+          E-mail
+          <input id="email" type="email">
+        </label>
+
+        <label>
+          Endereço
+          <input id="endereco">
+        </label>
+
+        <div>
+          <button>Salvar</button>
+          <button type="button" class="sec" id="cancelar">
+            Cancelar
+          </button>
+        </div>
+      </form>
+
+      <small>
+        Ao editar, deixe o CPF vazio para mantê-lo.
+        O CPF é armazenado criptografado (bcrypt) e não é exibido.
+      </small>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Telefone</th>
+            <th>E-mail</th>
+            <th>Endereço</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody id="lista"></tbody>
+      </table>
+    </div>
+
+    <section class="card" id="historico" hidden>
+      <h3 id="historicoTitulo">Histórico de atendimentos</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Aparelho</th>
+            <th>IMEI</th>
+            <th>Serviço</th>
+            <th>Status</th>
+            <th>Observação</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="historicoLista"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+
+  <script>
+    const campos = [
+      "nome",
+      "cpf",
+      "telefone",
+      "email",
+      "endereco"
+    ];
+    const busca = document.getElementById("busca");
+    const q = document.getElementById("q");
+    const historico = document.getElementById("historico");
+    const historicoTitulo = document.getElementById("historicoTitulo");
+    const historicoLista = document.getElementById("historicoLista");
+
+    // Volta o formulário para "Novo cliente"
+    function limpar() {
+      f.reset();
+      id.value = "";
+      titulo.textContent = "Novo cliente";
+    }
+
+    // Coloca o cliente no formulário
+    // (o CPF fica vazio: só muda se for digitado)
+    function editar(c) {
+      historico.hidden = true;
+      preencher(campos, c);
+      id.value = c.id;
+      titulo.textContent = "Editar cliente #" + c.id;
+      scrollTo(0, 0);
+    }
+
+    // Busca na API e desenha a tabela
+    async function carregar() {
+      const dados = await api(
+        "/api/clientes?q=" + encodeURIComponent(q.value)
+      );
+
+      lista.replaceChildren(
+        ...dados.map(c =>
+          linha(
+            [
+              c.nome,
+              c.telefone,
+              c.email,
+              c.endereco
+            ],
+            botao("Histórico", () => carregarHistorico(c)),
+            botao("Editar", () => editar(c)),
+            botaoExcluir(
+              "/api/clientes/" + c.id,
+              "Excluir " + c.nome + "?",
+              carregar
+            )
+          )
+        )
+      );
+      
+      // Buscar Cliente
+      if (!dados.length) {
+        lista.append(
+          linha(["Nenhum cliente encontrado."])
+        );
+      }
+    }
+
+    async function carregarHistorico(cliente) {
+      try {
+        const dados = await api("/api/clientes/" + cliente.id + "/historico");
+        historicoTitulo.textContent = "Histórico de atendimentos - " + cliente.nome;
+        historicoLista.replaceChildren(
+          ...dados.map(atendimento =>
+            linha([
+              fmtData(atendimento.data_agendamento),
+              atendimento.marca + " " + atendimento.modelo,
+              atendimento.imei,
+              atendimento.servico,
+              atendimento.status,
+              atendimento.observacao || "—"
+            ])
+          )
+        );
+
+        if (!dados.length) {
+          historicoLista.replaceChildren(linha(["Nenhum atendimento encontrado."]));
+        }
+
+        historico.hidden = false;
+        historico.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (error) {
+        mensagem("erro", error.message);
+      }
+    }
+
+    busca.onsubmit = e => {
+      e.preventDefault();
+      tentar(carregar);
+    };
+
+    todos.onclick = () => {
+      q.value = "";
+      tentar(carregar);
+    };
+
+    cancelar.onclick = limpar;
+
+    // Salvar: com id é edição (PUT), sem id é cadastro (POST)
+    f.onsubmit = e => {
+      e.preventDefault();
+
+      tentar(async () => {
+        await api(
+          "/api/clientes" + (id.value ? "/" + id.value : ""),
+          id.value ? "PUT" : "POST",
+          lerCampos(campos)
+        );
+
+        limpar();
+        await carregar();
+      }, "Cliente salvo com sucesso.");
+    };
+
+    montarMenu();
+    tentar(carregar);
+  </script>
+</body>
+
+</html>
